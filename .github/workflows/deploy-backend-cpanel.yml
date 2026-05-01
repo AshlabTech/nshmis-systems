@@ -1,0 +1,164 @@
+name: Deploy Backend to cPanel
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "backend/**"
+      - ".github/workflows/deploy-backend-cpanel.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-backend-cpanel
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          tools: composer:v2
+          extensions: mbstring, bcmath, curl, dom, fileinfo, openssl, pdo, pdo_mysql, tokenizer, xml, ctype, json
+
+      - name: Install Composer dependencies
+        run: composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install NPM dependencies
+        run: npm ci
+
+      - name: Build Vite assets
+        run: npm run build
+
+      - name: Clear Laravel caches before packaging
+        run: |
+          php artisan config:clear
+          php artisan route:clear
+          php artisan view:clear
+
+      - name: Prepare deploy artifacts
+        run: |
+          mkdir -p ../deploy-app ../deploy-public
+
+          rsync -av --delete \
+            --exclude ".env" \
+            --exclude ".git" \
+            --exclude ".github" \
+            --exclude "node_modules" \
+            --exclude "public" \
+            --exclude "tests" \
+            --exclude "storage/*.key" \
+            --exclude "storage/logs/*" \
+            --exclude "storage/framework/cache/*" \
+            --exclude "storage/framework/sessions/*" \
+            --exclude "storage/framework/views/*" \
+            --exclude "bootstrap/cache/*.php" \
+            ./ ../deploy-app/
+
+          rsync -av --delete ./public/ ../deploy-public/
+
+          sed -i "s|__DIR__.'/../storage/framework/maintenance.php'|__DIR__.'/../backend/storage/framework/maintenance.php'|" ../deploy-public/index.php
+          sed -i "s|__DIR__.'/../vendor/autoload.php'|__DIR__.'/../backend/vendor/autoload.php'|" ../deploy-public/index.php
+          sed -i "s|__DIR__.'/../bootstrap/app.php'|__DIR__.'/../backend/bootstrap/app.php'|" ../deploy-public/index.php
+
+      - name: Package deploy artifacts
+        working-directory: .
+        run: |
+          rm -rf deploy-public/storage
+          tar -czf deploy-app.tar.gz -C deploy-app .
+          tar -czf deploy-public.tar.gz -C deploy-public .
+
+      - name: Ensure remote directories
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.CPANEL_SSH_HOST }}
+          username: ${{ secrets.CPANEL_SSH_USER }}
+          key: ${{ secrets.CPANEL_SSH_KEY }}
+          passphrase: ${{ secrets.CPANEL_SSH_PASSPHRASE }}
+          password: ${{ secrets.CPANEL_SSH_PASSWORD }}
+          port: ${{ secrets.CPANEL_SSH_PORT || '22' }}
+          command_timeout: 120m
+          script: |
+            set -e
+            mkdir -p /home/easegupz/hmis.ashlabtech.ng/backend
+            mkdir -p /home/easegupz/hmis.ashlabtech.ng/public
+            mkdir -p /home/${{ secrets.CPANEL_SSH_USER }}/tmp/gha-hmis-backend
+
+      - name: Upload deploy archives
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.CPANEL_SSH_HOST }}
+          username: ${{ secrets.CPANEL_SSH_USER }}
+          key: ${{ secrets.CPANEL_SSH_KEY }}
+          passphrase: ${{ secrets.CPANEL_SSH_PASSPHRASE }}
+          password: ${{ secrets.CPANEL_SSH_PASSWORD }}
+          port: ${{ secrets.CPANEL_SSH_PORT || '22' }}
+          command_timeout: 120m
+          source: "deploy-app.tar.gz,deploy-public.tar.gz"
+          target: "/home/${{ secrets.CPANEL_SSH_USER }}/tmp/gha-hmis-backend"
+
+      - name: Extract and activate release
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.CPANEL_SSH_HOST }}
+          username: ${{ secrets.CPANEL_SSH_USER }}
+          key: ${{ secrets.CPANEL_SSH_KEY }}
+          passphrase: ${{ secrets.CPANEL_SSH_PASSPHRASE }}
+          password: ${{ secrets.CPANEL_SSH_PASSWORD }}
+          port: ${{ secrets.CPANEL_SSH_PORT || '22' }}
+          command_timeout: 120m
+          script: |
+            set -e
+
+            APP_DIR="/home/easegupz/hmis.ashlabtech.ng/backend"
+            PUBLIC_DIR="/home/easegupz/hmis.ashlabtech.ng/public"
+            TMP_DIR="/home/${{ secrets.CPANEL_SSH_USER }}/tmp/gha-hmis-backend"
+
+            mkdir -p "$APP_DIR" "$PUBLIC_DIR"
+
+            find "$APP_DIR" -mindepth 1 -maxdepth 1 \
+              ! -name ".env" \
+              ! -name "storage" \
+              -exec rm -rf {} +
+
+            find "$PUBLIC_DIR" -mindepth 1 -maxdepth 1 \
+              ! -name ".well-known" \
+              -exec rm -rf {} +
+
+            tar -xzf "$TMP_DIR/deploy-app.tar.gz" -C "$APP_DIR"
+            tar -xzf "$TMP_DIR/deploy-public.tar.gz" -C "$PUBLIC_DIR"
+
+            mkdir -p "$APP_DIR/storage/app/public" \
+              "$APP_DIR/storage/framework/cache" \
+              "$APP_DIR/storage/framework/sessions" \
+              "$APP_DIR/storage/framework/views" \
+              "$APP_DIR/storage/logs" \
+              "$APP_DIR/bootstrap/cache"
+
+            if [ -f "$APP_DIR/artisan" ]; then
+              php "$APP_DIR/artisan" optimize:clear || true
+              php "$APP_DIR/artisan" storage:link || true
+              php "$APP_DIR/artisan" migrate --force
+              php "$APP_DIR/artisan" config:cache || true
+              php "$APP_DIR/artisan" route:cache || true
+              php "$APP_DIR/artisan" view:cache || true
+            fi
+
+            rm -f "$TMP_DIR/deploy-app.tar.gz" "$TMP_DIR/deploy-public.tar.gz"
