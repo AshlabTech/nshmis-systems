@@ -1,0 +1,13 @@
+{
+  "resources/css/admin.css": {
+    "file": "assets/admin-Cf17ttl-.css",
+    "src": "resources/css/admin.css",
+    "isEntry": true
+  },
+  "resources/js/app.jsx": {
+    "file": "assets/app-exaNztbC.js",
+    "name": "app",
+    "src": "resources/js/app.jsx",
+    "isEntry": true
+  }
+}
