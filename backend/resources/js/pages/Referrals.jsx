@@ -15,6 +15,7 @@ function DetailSection({ title, children }) {
   );
 }
 
+
 function DetailTable({ rows }) {
   return (
     <table className="detail-table">
