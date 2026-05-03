@@ -54,7 +54,15 @@ class MetadataController extends Controller
                 $wardQuery->whereRaw('1 = 0');
             }
         }
-        $wards = $wardQuery->get(['id', 'uuid', 'lga_id', 'name']);
+        $wards = $wardQuery
+            ->get(['id', 'uuid', 'lga_id', 'name'])
+            ->map(fn (Ward $ward) => [
+                'id' => $ward->id,
+                'uuid' => $ward->uuid,
+                'lga_id' => $ward->lga_id,
+                'lga_uuid' => $ward->lga?->uuid,
+                'name' => $ward->name,
+            ]);
 
         // Build facility query scoped to accessible LGAs
         $facilityQuery = Facility::query()->orderBy('name');

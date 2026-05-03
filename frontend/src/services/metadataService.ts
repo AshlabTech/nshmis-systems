@@ -3,10 +3,10 @@ import { upsertAdministrativeMetadata, replaceFacilities } from '../database/rep
 import type { FacilityRecord, LgaRecord, WardRecord } from '../types/models';
 import { debugFetch } from './debugFetch';
 
-// The backend Ward model has lga_id (integer FK) not lga_uuid.
-// We receive lga_id from the API and must resolve it to lga_uuid before storing.
-type RawWard = { id?: number; uuid: string; lga_id?: number; lga_uuid?: string; name: string };
-type RawLga = { id: number; uuid: string; name: string };
+// Older API responses only include lga_id; newer ones include lga_uuid directly.
+// Normalize both shapes before storing wards locally because the wizard filters by lga_uuid.
+type RawWard = { id?: number | string; uuid: string; lga_id?: number | string; lga_uuid?: string | null; lga?: { uuid?: string | null }; name: string };
+type RawLga = { id: number | string; uuid: string; name: string };
 
 type MetadataResponse = {
   lgas?: RawLga[];
@@ -28,14 +28,15 @@ export const metadataService = {
     const body = (await response.json().catch(() => ({}))) as MetadataResponse;
 
     if (body.lgas?.length && Array.isArray(body.wards)) {
-      // Build lga_id → lga_uuid lookup so we can store the correct UUID on each ward.
-      const lgaIdToUuid = new Map<number, string>(body.lgas.map((l) => [l.id, l.uuid]));
+      const lgaIdToUuid = new Map<string, string>(body.lgas.map((l) => [String(l.id), l.uuid]));
 
-      const wards: WardRecord[] = body.wards.map((w) => ({
-        uuid: w.uuid,
-        name: w.name,
-        lga_uuid: w.lga_uuid ?? lgaIdToUuid.get(w.lga_id ?? -1) ?? '',
-      }));
+      const wards: WardRecord[] = body.wards
+        .map((w) => ({
+          uuid: w.uuid,
+          name: w.name,
+          lga_uuid: w.lga_uuid ?? w.lga?.uuid ?? (w.lga_id === undefined ? undefined : lgaIdToUuid.get(String(w.lga_id))),
+        }))
+        .filter((w): w is WardRecord => Boolean(w.lga_uuid));
 
       await upsertAdministrativeMetadata({ lgas: body.lgas as LgaRecord[], wards });
     }

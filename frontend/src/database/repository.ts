@@ -403,22 +403,33 @@ export const upsertAdministrativeMetadata = async (payload: { lgas: LgaRecord[];
   const newLgaUuids = payload.lgas.map((l) => l.uuid);
   const newWardUuids = payload.wards.map((w) => w.uuid);
 
-  // Remove LGAs (and their wards) that are no longer in the assigned set.
-  // This handles both the initial seed (lga-* prefix) and stale server UUIDs
-  // left over from a previous full refresh before assignments were configured.
   if (newLgaUuids.length > 0) {
-    const ph = newLgaUuids.map(() => '?').join(',');
-    await execute(`DELETE FROM wards WHERE lga_uuid NOT IN (${ph})`, newLgaUuids);
-    await execute(`DELETE FROM lgas WHERE uuid NOT IN (${ph})`, newLgaUuids);
+    const lgaPh = newLgaUuids.map(() => '?').join(',');
+
+    // Delete wards with null lga_uuid (from previously-failed inserts) AND
+    // wards for LGAs no longer in the assigned set.
+    // NULL NOT IN (...) is NULL in SQL, so we must use IS NULL explicitly.
+    await execute(
+      `DELETE FROM wards WHERE lga_uuid IS NULL OR lga_uuid NOT IN (${lgaPh})`,
+      newLgaUuids
+    );
+
+    // Delete stale wards for assigned LGAs that the server no longer returns.
+    // Doing this before the INSERT prevents UNIQUE(lga_uuid, name) conflicts.
+    if (newWardUuids.length > 0) {
+      const wardPh = newWardUuids.map(() => '?').join(',');
+      await execute(
+        `DELETE FROM wards WHERE lga_uuid IN (${lgaPh}) AND uuid NOT IN (${wardPh})`,
+        [...newLgaUuids, ...newWardUuids]
+      );
+    } else {
+      await execute(`DELETE FROM wards WHERE lga_uuid IN (${lgaPh})`, newLgaUuids);
+    }
+
+    await execute(`DELETE FROM lgas WHERE uuid NOT IN (${lgaPh})`, newLgaUuids);
   } else {
     await execute(`DELETE FROM wards`);
     await execute(`DELETE FROM lgas`);
-  }
-
-  // Remove individual wards that are no longer in the new ward set.
-  if (newWardUuids.length > 0) {
-    const ph = newWardUuids.map(() => '?').join(',');
-    await execute(`DELETE FROM wards WHERE uuid NOT IN (${ph})`, newWardUuids);
   }
 
   for (const lga of payload.lgas) {
@@ -429,6 +440,7 @@ export const upsertAdministrativeMetadata = async (payload: { lgas: LgaRecord[];
     );
   }
 
+  // LGAs are now in the table — FK checks on ward inserts will pass.
   for (const ward of payload.wards) {
     await execute(
       `INSERT INTO wards (uuid, lga_uuid, name, updated_at) VALUES (?, ?, ?, ?)
