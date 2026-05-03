@@ -14,39 +14,108 @@ import Pagination from '../components/ui/Pagination';
 import StatusPill from '../components/ui/StatusPill';
 import { ControlledSelect, SelectField, TextField } from '../components/ui/FormField';
 
-function DetailGrid({ rows }) {
+function DetailSection({ title, children }) {
   return (
-    <div className="detail-grid">
-      {rows.map(([label, value]) => (
-        <div key={label} className="detail-cell">
-          <span className="detail-cell-label">{label}</span>
-          <span className="detail-cell-value">{String(value || '—')}</span>
-        </div>
-      ))}
+    <div className="detail-section">
+      <div className="detail-section-title">{title}</div>
+      {children}
     </div>
   );
 }
 
-function PatientDetail({ patient }) {
+function DetailTable({ rows }) {
   return (
-    <>
-      <DetailGrid
-        rows={[
-          ['Sex', patient.sex],
+    <table className="detail-table">
+      <tbody>
+        {rows.map(([label, value]) => (
+          <tr key={label}>
+            <td className="detail-table-label">{label}</td>
+            <td className="detail-table-value">{value ?? '—'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function fetchPdfBlob(uuid, token, showToast) {
+  return fetch(`/api/v1/patients/${uuid}/pdf`, { headers: { Authorization: `Bearer ${token}` } })
+    .then((r) => { if (!r.ok) throw new Error('PDF generation failed.'); return r.blob(); })
+    .catch((err) => { showToast(err.message, 'error'); return null; });
+}
+
+function PatientDetail({ patient, token, showToast }) {
+  const handleDownloadPdf = async () => {
+    const blob = await fetchPdfBlob(patient.uuid, token, showToast);
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `patient-${patient.uuid}.pdf`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handlePrint = async () => {
+    const blob = await fetchPdfBlob(patient.uuid, token, showToast);
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const win = window.open(url);
+    win?.addEventListener('load', () => { win.print(); });
+  };
+
+  return (
+    <div className="detail-modal-body">
+      <div className="detail-modal-actions" style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <button className="btn-outline btn-sm" onClick={handlePrint}>🖨 Print</button>
+        <button className="btn-outline btn-sm" onClick={handleDownloadPdf}>⬇ Download PDF</button>
+      </div>
+
+      <DetailSection title="Patient Identity">
+        <DetailTable rows={[
+          ['Reference', shortRef(patient.uuid)],
+          ['Full Name', fullName(patient)],
+        ]} />
+      </DetailSection>
+
+      <DetailSection title="Demographics">
+        <DetailTable rows={[
+          ['Sex', patient.sex ? patient.sex.charAt(0).toUpperCase() + patient.sex.slice(1) : null],
           ['Date of Birth', formatDate(patient.date_of_birth)],
-          ['Estimated Age', patient.estimated_age_years],
-          ['NHIS Status', patient.nhis_status],
+          ['Estimated Age', patient.estimated_age_years ? `${patient.estimated_age_years} years` : null],
+          ['Age Estimated', patient.is_estimated_age ? 'Yes' : 'No'],
+        ]} />
+      </DetailSection>
+
+      <DetailSection title="Contact Information">
+        <DetailTable rows={[
           ['Phone Number', patient.phone_number],
           ['Address', patient.address_line],
+        ]} />
+      </DetailSection>
+
+      <DetailSection title="Location & Facility">
+        <DetailTable rows={[
           ['LGA', patient.lga?.name],
           ['Ward', patient.ward?.name],
-        ]}
-      />
+          ['Primary Facility', patient.primary_facility?.name
+            ? `${patient.primary_facility.name}${patient.primary_facility.type ? ` (${patient.primary_facility.type})` : ''}`
+            : null],
+        ]} />
+      </DetailSection>
+
+      <DetailSection title="Program Information">
+        <DetailTable rows={[
+          ['NHIS Status', patient.nhis_status ? patient.nhis_status.charAt(0).toUpperCase() + patient.nhis_status.slice(1) : null],
+          ['Enrollment Date', formatDate(patient.created_at)],
+          ['Created By', patient.creator?.name],
+          ['Sync Status', <StatusPill key="sync" value={patient.sync_status} />],
+          ['Synced At', patient.synced_at ? formatDate(patient.synced_at, true) : null],
+        ]} />
+      </DetailSection>
+
       {(patient.encounters?.length > 0) && (
-        <div className="panel" style={{ marginTop: 16 }}>
-          <h3 style={{ margin: '0 0 14px', fontSize: 14, fontWeight: 700 }}>Encounter History</h3>
+        <DetailSection title={`Encounter History (${patient.encounters.length})`}>
           <DataTable
-            headers={['Encounter', 'Type', 'Date', 'Data Clerk']}
+            headers={['Ref', 'Type', 'Date', 'Data Clerk', 'Sync']}
             rows={patient.encounters || []}
             renderRow={(item) => (
               <tr key={item.uuid}>
@@ -54,12 +123,13 @@ function PatientDetail({ patient }) {
                 <td>{item.encounter_type || '—'}</td>
                 <td>{formatDate(item.encounter_date)}</td>
                 <td>{item.creator?.name || '—'}</td>
+                <td><StatusPill value={item.sync_status} /></td>
               </tr>
             )}
           />
-        </div>
+        </DetailSection>
       )}
-    </>
+    </div>
   );
 }
 
@@ -98,10 +168,11 @@ export default function Patients() {
   async function openDetail(uuid) {
     try {
       const patient = await apiRequest(`/patients/${uuid}`);
+      const token = auth.token;
       openModal({
         title: fullName(patient),
         subtitle: shortRef(patient.uuid),
-        content: <PatientDetail patient={patient} />,
+        content: <PatientDetail patient={patient} token={token} showToast={showToast} />,
       });
     } catch (err) {
       showToast(err.message, 'error');
@@ -153,7 +224,7 @@ export default function Patients() {
           <div className="loading">Loading patients…</div>
         ) : (
           <DataTable
-            headers={['Patient', 'Sex / NHIS', 'Location', 'Phone', 'Sync Status', 'Registered', '']}
+            headers={['Patient', 'Sex / NHIS', 'Location', 'Primary Facility', 'Phone', 'Sync', 'Registered', '']}
             rows={result?.data || []}
             renderRow={(patient) => (
               <tr key={patient.uuid}>
@@ -169,6 +240,7 @@ export default function Patients() {
                   {patient.lga?.name || '—'}
                   <div className="mini-note">{patient.ward?.name || '—'}</div>
                 </td>
+                <td>{patient.primary_facility?.name || '—'}</td>
                 <td>{patient.phone_number || '—'}</td>
                 <td><StatusPill value={patient.sync_status} /></td>
                 <td>{formatDate(patient.created_at, true)}</td>

@@ -1216,3 +1216,38 @@ td strong {
 @media (max-width: 480px) {
   .grid-cards { grid-template-columns: 1fr; }
 }
+
+/* ── Professional Detail Modals ──────────────────────────── */
+.detail-modal-body { display: flex; flex-direction: column; gap: 0; }
+.detail-modal-actions { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+
+.detail-section { margin-bottom: 18px; }
+.detail-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--primary);
+  border-bottom: 1.5px solid var(--teal-100);
+  padding-bottom: 5px;
+  margin-bottom: 8px;
+}
+
+.detail-table { width: 100%; border-collapse: collapse; }
+.detail-table tr { border-bottom: 1px solid var(--gray-100); }
+.detail-table tr:last-child { border-bottom: none; }
+.detail-table td { padding: 6px 10px; font-size: 13px; vertical-align: top; }
+.detail-table-label {
+  width: 40%;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.detail-table-value { color: var(--text-primary); }
+
+@media (max-width: 600px) {
+  .detail-table, .detail-table tbody, .detail-table tr, .detail-table td { display: block; width: 100%; }
+  .detail-table tr { margin-bottom: 8px; }
+  .detail-table-label { font-size: 11px; color: var(--text-muted); padding-bottom: 2px; }
+  .detail-table-value { padding-top: 0; }
+}

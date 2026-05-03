@@ -22,24 +22,58 @@ class MetadataController extends Controller
     {
         $user = $request->user();
 
-        $lgas = Lga::query()
-            ->when($user->role === 'supervisor' && $user->assigned_lga_uuid, fn ($query) => $query->where('uuid', $user->assigned_lga_uuid))
-            ->orderBy('name')
-            ->get(['id', 'uuid', 'name']);
-        $wards = Ward::query()
-            ->with('lga:id,uuid,name')
-            ->when($user->role === 'supervisor' && $user->assigned_lga_uuid, function ($query) use ($user) {
-                $query->whereHas('lga', fn ($lgaQuery) => $lgaQuery->where('uuid', $user->assigned_lga_uuid));
-            })
-            ->when($user->role === 'supervisor' && $user->assigned_ward_uuid, fn ($query) => $query->where('uuid', $user->assigned_ward_uuid))
-            ->orderBy('name')
-            ->get(['id', 'uuid', 'lga_id', 'name']);
+        // Build LGA query based on role
+        $lgaQuery = Lga::query()->orderBy('name');
+        if ($user->role === 'supervisor' && $user->assigned_lga_uuid) {
+            $lgaQuery->where('uuid', $user->assigned_lga_uuid);
+        } elseif ($user->role === 'data_clerk') {
+            $assignedLgaIds = $user->assignedLgas()->pluck('lgas.id');
+            if ($assignedLgaIds->isNotEmpty()) {
+                $lgaQuery->whereIn('id', $assignedLgaIds);
+            } else {
+                // No LGAs assigned — return empty so mobile shows the no-LGA warning
+                $lgaQuery->whereRaw('1 = 0');
+            }
+        }
+        $lgas = $lgaQuery->get(['id', 'uuid', 'name']);
 
-        $facilities = Facility::query()
-            ->when($user->role === 'supervisor' && $user->assigned_lga_uuid, fn ($query) => $query->where('lga_uuid', $user->assigned_lga_uuid))
-            ->when($user->role === 'supervisor' && $user->assigned_ward_uuid, fn ($query) => $query->where('ward_uuid', $user->assigned_ward_uuid))
-            ->orderBy('name')
-            ->get(['id', 'uuid', 'name', 'lga_uuid', 'ward_uuid', 'type', 'status']);
+        // Build ward query scoped to accessible LGAs
+        $wardQuery = Ward::query()->with('lga:id,uuid,name')->orderBy('name');
+        if ($user->role === 'supervisor') {
+            if ($user->assigned_lga_uuid) {
+                $wardQuery->whereHas('lga', fn ($q) => $q->where('uuid', $user->assigned_lga_uuid));
+            }
+            if ($user->assigned_ward_uuid) {
+                $wardQuery->where('uuid', $user->assigned_ward_uuid);
+            }
+        } elseif ($user->role === 'data_clerk') {
+            $assignedLgaIds = $user->assignedLgas()->pluck('lgas.id');
+            if ($assignedLgaIds->isNotEmpty()) {
+                $wardQuery->whereIn('lga_id', $assignedLgaIds);
+            } else {
+                $wardQuery->whereRaw('1 = 0');
+            }
+        }
+        $wards = $wardQuery->get(['id', 'uuid', 'lga_id', 'name']);
+
+        // Build facility query scoped to accessible LGAs
+        $facilityQuery = Facility::query()->orderBy('name');
+        if ($user->role === 'supervisor') {
+            if ($user->assigned_lga_uuid) {
+                $facilityQuery->where('lga_uuid', $user->assigned_lga_uuid);
+            }
+            if ($user->assigned_ward_uuid) {
+                $facilityQuery->where('ward_uuid', $user->assigned_ward_uuid);
+            }
+        } elseif ($user->role === 'data_clerk') {
+            $assignedLgaUuids = $user->assignedLgas()->pluck('lgas.uuid');
+            if ($assignedLgaUuids->isNotEmpty()) {
+                $facilityQuery->whereIn('lga_uuid', $assignedLgaUuids);
+            } else {
+                $facilityQuery->whereRaw('1 = 0');
+            }
+        }
+        $facilities = $facilityQuery->get(['id', 'uuid', 'name', 'lga_uuid', 'ward_uuid', 'type', 'status']);
 
         $diseaseCategories = DiseaseCategory::query()->orderBy('name')->get(['id', 'uuid', 'name', 'status']);
         $serviceCategories = ServiceCategory::query()->orderBy('name')->get(['id', 'uuid', 'name', 'status']);
@@ -48,6 +82,11 @@ class MetadataController extends Controller
             ->get(['id', 'name', 'email', 'role', 'assigned_lga_uuid', 'assigned_ward_uuid', 'team_name']);
 
         $appSettings = AppSetting::getInstance();
+
+        // For data_clerk: expose their specific LGA assignments for mobile enforcement
+        $assignedLgas = $user->role === 'data_clerk'
+            ? $user->assignedLgas()->get(['lgas.id', 'lgas.uuid', 'lgas.name'])
+            : null;
 
         return response()->json([
             'branding' => [
@@ -60,6 +99,7 @@ class MetadataController extends Controller
             'disease_categories' => $diseaseCategories,
             'service_categories' => $serviceCategories,
             'users' => $users,
+            'assigned_lgas' => $assignedLgas,
             'roles' => [
                 ['value' => 'data_clerk', 'label' => 'Data Clerk'],
                 ['value' => 'supervisor', 'label' => 'Supervisor'],

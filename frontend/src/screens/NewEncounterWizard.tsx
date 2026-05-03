@@ -12,6 +12,7 @@ import { TextInputField } from '../components/TextInputField';
 import { THEME } from '../config/appConfig';
 import { useAppContext } from '../context/AppContext';
 import { getLocalDraftByEncounterUuid, listFacilities, listLgas, listWardsByLga, saveEncounterDraft, savePatientDraft, saveReferralDraft, setEntitySyncStatus, upsertSyncQueue } from '../database/repository';
+import { FacilityRecord } from '../types/models';
 import { validateStep } from '../utils/wizardValidation';
 import { WizardData } from '../types/models';
 
@@ -25,7 +26,7 @@ const blankWizard = (): WizardData => ({
   encounter_uuid: uuidv4(),
   referral_uuid: uuidv4(),
   step: 1,
-  patient: { anonymized: false, full_name: '', age_years: '', sex: '', phone: '', nhis_status: '', lga_uuid: '', ward_uuid: '', consent_confirmed: false },
+  patient: { anonymized: false, full_name: '', age_years: '', sex: '', phone: '', nhis_status: '', nin: '', lga_uuid: '', ward_uuid: '', primary_facility_uuid: '', consent_confirmed: false },
   clinical: {
     encounter_date: new Date().toISOString().slice(0, 10),
     outreach_location: '',
@@ -48,13 +49,13 @@ export const NewEncounterWizard = () => {
   const [syncing, setSyncing] = useState(false);
   const [lgaItems, setLgaItems] = useState<{ label: string; value: string }[]>([]);
   const [wardItems, setWardItems] = useState<{ label: string; value: string }[]>([]);
-  const [facilityItems, setFacilityItems] = useState<{ label: string; value: string }[]>([]);
+  const [facilitiesData, setFacilitiesData] = useState<FacilityRecord[]>([]);
 
   useEffect(() => {
     const load = async () => {
       const [lgas, facilities, lastLga, lastWard] = await Promise.all([listLgas(), listFacilities(), AsyncStorage.getItem(LAST_LGA_KEY), AsyncStorage.getItem(LAST_WARD_KEY)]);
       setLgaItems(lgas.map((item) => ({ label: item.name, value: item.uuid })));
-      setFacilityItems(facilities.map((item) => ({ label: item.name, value: item.name })));
+      setFacilitiesData(facilities);
 
       const draftUuid = route.params?.draftUuid as string | undefined;
       if (draftUuid) {
@@ -73,8 +74,10 @@ export const NewEncounterWizard = () => {
               sex: draft.patient?.sex ?? '',
               phone: draft.patient?.phone ?? '',
               nhis_status: draft.patient?.nhis_status ?? '',
+              nin: draft.patient?.nin ?? '',
               lga_uuid: draft.patient?.lga_uuid ?? lastLga ?? '',
               ward_uuid: draft.patient?.ward_uuid ?? lastWard ?? '',
+              primary_facility_uuid: (draft.patient as any)?.primary_facility_uuid ?? '',
               consent_confirmed: Boolean(draft.patient?.consent_confirmed),
             },
             clinical: {
@@ -136,6 +139,23 @@ export const NewEncounterWizard = () => {
   const stepErrors = useMemo(() => validateStep(data.step, data), [data]);
   const canProceed = Object.keys(stepErrors).length === 0;
 
+  // All facilities (used on the referral step where any facility can be targeted)
+  const facilityItems = useMemo(
+    () => facilitiesData.map((f) => ({ label: f.name, value: f.uuid })),
+    [facilitiesData]
+  );
+
+  // Facilities strictly scoped to the selected LGA — empty when no LGA is chosen.
+  const lgaFacilityItems = useMemo(
+    () =>
+      data.patient.lga_uuid
+        ? facilitiesData
+            .filter((f) => f.lga_uuid === data.patient.lga_uuid)
+            .map((f) => ({ label: f.name, value: f.uuid }))
+        : [],
+    [facilitiesData, data.patient.lga_uuid]
+  );
+
   const setPatientField = (patch: Partial<WizardData['patient']>) => setData((current) => ({ ...current, patient: { ...current.patient, ...patch } }));
   const setClinicalField = (patch: Partial<WizardData['clinical']>) => setData((current) => ({ ...current, clinical: { ...current.clinical, ...patch } }));
   const setServicesField = (patch: Partial<WizardData['services']>) => setData((current) => ({ ...current, services: { ...current.services, ...patch } }));
@@ -151,8 +171,10 @@ export const NewEncounterWizard = () => {
       sex: data.patient.sex || null,
       phone: data.patient.phone || null,
       nhis_status: data.patient.nhis_status || null,
+      nin: data.patient.nin.trim() || null,
       lga_uuid: data.patient.lga_uuid || null,
       ward_uuid: data.patient.ward_uuid || null,
+      primary_facility_uuid: data.patient.primary_facility_uuid || null,
       consent_confirmed: data.patient.consent_confirmed,
       sync_status: 'draft' as const,
     }),
@@ -317,6 +339,15 @@ export const NewEncounterWizard = () => {
       {data.step === 1 && (
         <FormCard>
           <Text style={styles.section}>Step 1: Patient Registration</Text>
+
+          {lgaItems.length === 0 && (
+            <View style={styles.noLgaBanner}>
+              <Text style={styles.noLgaText}>
+                No LGA has been assigned to your account. Please contact your supervisor/admin before enrolling patients.
+              </Text>
+            </View>
+          )}
+
           <View style={styles.switchRow}>
             <Text style={styles.switchLabel}>Record as anonymized</Text>
             <Switch value={data.patient.anonymized} onValueChange={(value) => setPatientField({ anonymized: value, full_name: value ? '' : data.patient.full_name })} trackColor={{ false: '#C7DADA', true: THEME.teal }} thumbColor="#fff" />
@@ -326,8 +357,37 @@ export const NewEncounterWizard = () => {
           <SearchableSelectField label="Sex" value={data.patient.sex} onValueChange={(value) => setPatientField({ sex: value })} items={[{ label: 'Male', value: 'male' }, { label: 'Female', value: 'female' }, { label: 'Other', value: 'other' }]} error={stepErrors.sex} />
           <TextInputField label="Phone" value={data.patient.phone} onChangeText={(value) => setPatientField({ phone: value })} keyboardType="phone-pad" />
           <SearchableSelectField label="NHIS status" value={data.patient.nhis_status} onValueChange={(value) => setPatientField({ nhis_status: value })} items={[{ label: 'Active', value: 'active' }, { label: 'Inactive', value: 'inactive' }, { label: 'Unknown', value: 'unknown' }]} />
-          <SearchableSelectField label="LGA" value={data.patient.lga_uuid} onValueChange={(value) => setPatientField({ lga_uuid: value, ward_uuid: '' })} items={lgaItems} error={stepErrors.lga_uuid} placeholder="Select LGA" emptyText="No LGAs available" />
-          <SearchableSelectField label="Ward" value={data.patient.ward_uuid} onValueChange={(value) => setPatientField({ ward_uuid: value })} items={wardItems} error={stepErrors.ward_uuid} placeholder="Select Ward" disabled={!data.patient.lga_uuid} disabledText="Select LGA first" emptyText="No wards available for this LGA" />
+          <TextInputField label="NIN (optional)" value={data.patient.nin} onChangeText={(value) => setPatientField({ nin: value })} keyboardType="numeric" />
+          <SearchableSelectField
+            label="LGA"
+            value={data.patient.lga_uuid}
+            onValueChange={(value) => setPatientField({ lga_uuid: value, ward_uuid: '', primary_facility_uuid: '' })}
+            items={lgaItems}
+            error={stepErrors.lga_uuid}
+            placeholder="Select LGA"
+            emptyText="No LGAs assigned to your account"
+          />
+          <SearchableSelectField
+            label="Ward"
+            value={data.patient.ward_uuid}
+            onValueChange={(value) => setPatientField({ ward_uuid: value })}
+            items={wardItems}
+            error={stepErrors.ward_uuid}
+            placeholder="Select Ward"
+            disabled={!data.patient.lga_uuid}
+            disabledText="Select LGA first"
+            emptyText="No wards available for this LGA"
+          />
+          <SearchableSelectField
+            label="Primary Facility"
+            value={data.patient.primary_facility_uuid}
+            onValueChange={(value) => setPatientField({ primary_facility_uuid: value })}
+            items={lgaFacilityItems}
+            placeholder="Select primary facility (optional)"
+            disabled={!data.patient.lga_uuid}
+            disabledText="Select LGA first"
+            emptyText="No facilities for this LGA"
+          />
           <View style={styles.switchRow}>
             <Text style={styles.switchLabel}>Consent confirmed</Text>
             <Switch value={data.patient.consent_confirmed} onValueChange={(value) => setPatientField({ consent_confirmed: value })} trackColor={{ false: '#C7DADA', true: THEME.teal }} thumbColor="#fff" />
@@ -427,9 +487,11 @@ const patientToBackend = (data: WizardData) => {
     is_estimated_age: Boolean(data.patient.age_years),
     temporary_id_hash: data.patient.anonymized ? data.patient_uuid.replace(/-/g, '') : null,
     phone_number: data.patient.phone || null,
+    nin: data.patient.nin.trim() || null,
     address_line: null,
     lga_uuid: data.patient.lga_uuid || null,
     ward_uuid: data.patient.ward_uuid || null,
+    primary_facility_uuid: data.patient.primary_facility_uuid || null,
     is_anonymized: data.patient.anonymized,
     consent_confirmed: data.patient.consent_confirmed,
   };
@@ -527,4 +589,18 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   chipText: { color: THEME.teal, fontSize: 13, fontWeight: '600' },
+  noLgaBanner: {
+    backgroundColor: '#fff3cd',
+    borderColor: '#ffc107',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 14,
+  },
+  noLgaText: {
+    color: '#856404',
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 20,
+  },
 });

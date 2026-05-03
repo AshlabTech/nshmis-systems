@@ -18,7 +18,7 @@ class PatientController extends Controller
     {
         $query = $this->applyPatientFilters(
             $this->scopeByUser(Patient::query(), $request->user())
-                ->with(['lga:id,uuid,name', 'ward:id,uuid,name', 'creator:id,name,email']),
+                ->with(['lga:id,uuid,name', 'ward:id,uuid,name', 'primaryFacility:id,uuid,name,type', 'creator:id,name,email']),
             $request
         )
             ->latest();
@@ -32,6 +32,7 @@ class PatientController extends Controller
         $patient->load([
             'lga:id,uuid,name',
             'ward:id,uuid,name',
+            'primaryFacility:id,uuid,name,type',
             'creator:id,name,email',
             'encounters' => fn ($query) => $query->with(['creator:id,name,email'])->latest('encounter_date'),
             'referrals' => fn ($query) => $query->with(['encounter:id,uuid,encounter_date'])->latest(),

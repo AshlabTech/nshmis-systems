@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { ChevronRight, ClipboardList, Clock3, FileText, History, Plus, Users } from 'lucide-react-native';
+import { ChevronRight, ClipboardList, Clock3, FileText, History, LogOut, Plus, Users } from 'lucide-react-native';
 import { CloudSyncIndicator } from '../components/CloudSyncIndicator';
 import { FormCard } from '../components/FormCard';
 import { PrimaryButton } from '../components/PrimaryButton';
@@ -21,7 +21,7 @@ const ratio = (value: number, total: number) => `${Math.max(8, total ? Math.roun
 
 export const HomeScreen = () => {
   const navigation = useNavigation<any>();
-  const { isOnline, syncInProgress, runSync, lastSyncMessage } = useAppContext();
+  const { isOnline, syncInProgress, runSync, lastSyncMessage, signOut, userId } = useAppContext();
   const [queue, setQueue] = useState<SyncQueueRecord[]>([]);
   const [patients, setPatients] = useState<PatientRecord[]>([]);
   const [encounters, setEncounters] = useState<EncounterRecord[]>([]);
@@ -48,6 +48,33 @@ export const HomeScreen = () => {
     return latest?.encounter_date ?? 'No encounters yet';
   }, [encounters]);
 
+  const handleLogout = () => {
+    const unsyncedCount = draftRecords + pendingRecords + failedCount;
+    const detail =
+      unsyncedCount > 0
+        ? `You have ${unsyncedCount} unsynced record(s).\n\nYour local data stays on this device — log back in to sync them to the server.\n\nLog out now?`
+        : 'Your local data will remain on this device.\n\nLog out?';
+    Alert.alert('Log out', detail, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Log Out', style: 'destructive', onPress: () => void signOut() },
+    ]);
+  };
+
+  // Use a ref so the header button always calls the latest handler without
+  // re-registering headerRight on every state change.
+  const handleLogoutRef = useRef(handleLogout);
+  handleLogoutRef.current = handleLogout;
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <Pressable onPress={() => handleLogoutRef.current()} hitSlop={10} style={styles.logoutBtn}>
+          <LogOut size={19} color="#fff" />
+        </Pressable>
+      ),
+    });
+  }, [navigation]);
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.hero}>
@@ -55,6 +82,7 @@ export const HomeScreen = () => {
           <Text style={styles.eyebrow}>Niger HMIS Outreach</Text>
           <Text style={styles.heading}>Field dashboard</Text>
           <Text style={styles.subheading}>Capture encounters, monitor local workload, and keep sync health visible.</Text>
+          {!!userId && <Text style={styles.userPill}>User: {userId}</Text>}
         </View>
         <CloudSyncIndicator isOnline={isOnline} pendingCount={pendingCount} syncing={syncInProgress} />
       </View>
@@ -228,5 +256,12 @@ const styles = StyleSheet.create({
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 8 },
     elevation: 8,
+  },
+  logoutBtn: { paddingHorizontal: 6, paddingVertical: 4 },
+  userPill: {
+    marginTop: 10,
+    color: '#9BE1DD',
+    fontSize: 11,
+    fontWeight: '700',
   },
 });

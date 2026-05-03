@@ -40,8 +40,10 @@ export const CREATE_TABLES_SQL = [
     sex TEXT,
     phone TEXT,
     nhis_status TEXT,
+    nin TEXT,
     lga_uuid TEXT REFERENCES lgas(uuid) ON UPDATE CASCADE ON DELETE SET NULL,
     ward_uuid TEXT REFERENCES wards(uuid) ON UPDATE CASCADE ON DELETE SET NULL,
+    primary_facility_uuid TEXT,
     consent_confirmed INTEGER NOT NULL DEFAULT 0,
     temporary_id_hash TEXT,
     sync_status TEXT NOT NULL DEFAULT 'draft' CHECK(sync_status IN ('draft', 'pending', 'syncing', 'synced', 'failed', 'conflict')),
@@ -160,6 +162,15 @@ export const CREATE_TABLES_SQL = [
   `CREATE INDEX IF NOT EXISTS idx_sync_queue_status ON sync_queue(status);`,
   `CREATE INDEX IF NOT EXISTS idx_sync_queue_created_at ON sync_queue(created_at);`,
   `CREATE INDEX IF NOT EXISTS idx_sync_logs_created_at ON sync_logs(created_at);`,
+];
+
+/**
+ * Run these after CREATE_TABLES_SQL. Each is idempotent (uses IF NOT EXISTS semantics where possible).
+ * For ADD COLUMN, SQLite will error if the column already exists — callers must catch and ignore SQLITE_ERROR.
+ */
+export const SCHEMA_MIGRATIONS_SQL = [
+  `ALTER TABLE patients ADD COLUMN primary_facility_uuid TEXT`,
+  `ALTER TABLE patients ADD COLUMN nin TEXT`,
 ];
 
 export const NIGER_LGAS = [

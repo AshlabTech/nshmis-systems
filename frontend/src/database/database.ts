@@ -1,5 +1,5 @@
 import * as SQLite from 'expo-sqlite';
-import { CREATE_TABLES_SQL, LOCAL_DB_NAME, NIGER_LGAS } from './LocalDatabaseSchema';
+import { CREATE_TABLES_SQL, LOCAL_DB_NAME, NIGER_LGAS, SCHEMA_MIGRATIONS_SQL } from './LocalDatabaseSchema';
 
 type SqlQueryResult<T = unknown> = {
   rows: {
@@ -37,6 +37,15 @@ export const initializeDatabase = async () => {
 
   for (const statement of CREATE_TABLES_SQL) {
     await db.execAsync(statement);
+  }
+
+  // Run schema migrations — ignore errors for columns that already exist
+  for (const migration of SCHEMA_MIGRATIONS_SQL) {
+    try {
+      await db.execAsync(migration);
+    } catch {
+      // Column already exists — safe to continue
+    }
   }
 
   for (const name of NIGER_LGAS) {

@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL } from '../config/appConfig';
+import { debugFetch } from './debugFetch';
 
 const CACHE_KEY = 'niger_hmis_branding';
 
@@ -21,7 +22,7 @@ type RawSettings = {
 export const brandingService = {
   fetch: async (): Promise<Branding> => {
     try {
-      const response = await fetch(`${API_BASE_URL}/settings`);
+      const response = await debugFetch(`${API_BASE_URL}/settings`);
       if (!response.ok) return brandingService.getCached();
       const body = (await response.json()) as RawSettings;
       const branding: Branding = {

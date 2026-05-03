@@ -48,9 +48,9 @@ export const savePatientDraft = async (patient: PatientRecord) => {
   await execute(
     `INSERT INTO patients (
       uuid, server_id, device_id, user_id, created_offline_at, full_name, first_name, middle_name, last_name,
-      is_anonymized, age_years, is_estimated_age, sex, phone, nhis_status, lga_uuid, ward_uuid,
+      is_anonymized, age_years, is_estimated_age, sex, phone, nhis_status, nin, lga_uuid, ward_uuid, primary_facility_uuid,
       consent_confirmed, temporary_id_hash, sync_status, synced_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(uuid) DO UPDATE SET
       server_id=excluded.server_id,
       device_id=excluded.device_id,
@@ -66,8 +66,10 @@ export const savePatientDraft = async (patient: PatientRecord) => {
       sex=excluded.sex,
       phone=excluded.phone,
       nhis_status=excluded.nhis_status,
+      nin=excluded.nin,
       lga_uuid=excluded.lga_uuid,
       ward_uuid=excluded.ward_uuid,
+      primary_facility_uuid=excluded.primary_facility_uuid,
       consent_confirmed=excluded.consent_confirmed,
       temporary_id_hash=excluded.temporary_id_hash,
       sync_status=excluded.sync_status,
@@ -89,8 +91,10 @@ export const savePatientDraft = async (patient: PatientRecord) => {
       patient.sex ?? null,
       patient.phone ?? null,
       patient.nhis_status ?? null,
+      patient.nin ?? null,
       patient.lga_uuid ?? null,
       patient.ward_uuid ?? null,
+      patient.primary_facility_uuid ?? null,
       truthy(patient.consent_confirmed),
       temporaryIdHash,
       patient.sync_status,
@@ -396,8 +400,26 @@ export const searchLgas = async (query: string) => {
 };
 
 export const upsertAdministrativeMetadata = async (payload: { lgas: LgaRecord[]; wards: WardRecord[] }) => {
-  await execute(`DELETE FROM wards WHERE lga_uuid LIKE 'lga-%'`);
-  await execute(`DELETE FROM lgas WHERE uuid LIKE 'lga-%'`);
+  const newLgaUuids = payload.lgas.map((l) => l.uuid);
+  const newWardUuids = payload.wards.map((w) => w.uuid);
+
+  // Remove LGAs (and their wards) that are no longer in the assigned set.
+  // This handles both the initial seed (lga-* prefix) and stale server UUIDs
+  // left over from a previous full refresh before assignments were configured.
+  if (newLgaUuids.length > 0) {
+    const ph = newLgaUuids.map(() => '?').join(',');
+    await execute(`DELETE FROM wards WHERE lga_uuid NOT IN (${ph})`, newLgaUuids);
+    await execute(`DELETE FROM lgas WHERE uuid NOT IN (${ph})`, newLgaUuids);
+  } else {
+    await execute(`DELETE FROM wards`);
+    await execute(`DELETE FROM lgas`);
+  }
+
+  // Remove individual wards that are no longer in the new ward set.
+  if (newWardUuids.length > 0) {
+    const ph = newWardUuids.map(() => '?').join(',');
+    await execute(`DELETE FROM wards WHERE uuid NOT IN (${ph})`, newWardUuids);
+  }
 
   for (const lga of payload.lgas) {
     await execute(
@@ -481,6 +503,7 @@ export const listFacilities = async (query = '') => {
 
 export const upsertFacilities = async (facilities: FacilityRecord[]) => {
   for (const facility of facilities) {
+    const facilityType = facility.facility_type ?? facility.type ?? null;
     await execute(
       `INSERT INTO facilities (uuid, name, facility_type, lga_uuid, updated_at)
        VALUES (?, ?, ?, ?, ?)
@@ -489,9 +512,14 @@ export const upsertFacilities = async (facilities: FacilityRecord[]) => {
          facility_type = excluded.facility_type,
          lga_uuid = excluded.lga_uuid,
          updated_at = excluded.updated_at`,
-      [facility.uuid, facility.name, facility.facility_type ?? null, facility.lga_uuid ?? null, touch()]
+      [facility.uuid, facility.name, facilityType, facility.lga_uuid ?? null, touch()]
     );
   }
+};
+
+export const replaceFacilities = async (facilities: FacilityRecord[]) => {
+  await execute(`DELETE FROM facilities`);
+  await upsertFacilities(facilities);
 };
 
 export const getPatientsPageCount = async () => {

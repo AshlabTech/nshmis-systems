@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Api\Concerns\AppliesRoleScope;
 use App\Http\Controllers\Controller;
 use App\Models\Encounter;
+use App\Models\Facility;
 use App\Models\Lga;
 use App\Models\Patient;
 use App\Models\Referral;
@@ -17,6 +19,7 @@ use Illuminate\Validation\Rule;
 
 class SyncController extends Controller
 {
+    use AppliesRoleScope;
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -83,13 +86,27 @@ class SyncController extends Controller
             $data = $item['data'];
             $data['uuid'] = $item['uuid'];
 
+            $syncUser = request()->user();
+
+            // Enforce LGA assignment for data_clerk
+            $this->assertDataClerkLgaAllowed($syncUser, $data['lga_uuid'] ?? null);
+
             $lgaId = $this->resolveLgaId($data);
             $wardId = $this->resolveWardId($data, $lgaId);
+
+            // Resolve primary_facility_id from uuid if provided
+            $primaryFacilityId = null;
+            $primaryFacilityUuid = $data['primary_facility_uuid'] ?? null;
+            if ($primaryFacilityUuid) {
+                $primaryFacilityId = Facility::where('uuid', $primaryFacilityUuid)->value('id');
+            }
 
             $payload = [
                 'uuid' => $item['uuid'],
                 'lga_id' => $lgaId,
                 'ward_id' => $wardId,
+                'primary_facility_id' => $primaryFacilityId,
+                'primary_facility_uuid' => $primaryFacilityUuid,
                 'lga_uuid' => $data['lga_uuid'] ?? null,
                 'ward_uuid' => $data['ward_uuid'] ?? null,
                 'first_name' => $data['first_name'] ?? null,
@@ -102,8 +119,9 @@ class SyncController extends Controller
                 'temporary_id_hash' => $data['temporary_id_hash'] ?? null,
                 'phone_number' => $data['phone_number'] ?? null,
                 'nhis_status' => $data['nhis_status'] ?? null,
+                'nin' => $data['nin'] ?? null,
                 'address_line' => $data['address_line'] ?? null,
-                'created_by_user_id' => request()->user()?->id,
+                'created_by_user_id' => $syncUser?->id,
                 'sync_status' => 'synced',
                 'synced_at' => now(),
             ];
@@ -125,6 +143,8 @@ class SyncController extends Controller
             $data = $item['data'];
             $data['uuid'] = $item['uuid'];
 
+            $syncUser = request()->user();
+
             $patientUuid = $data['patient_uuid'] ?? null;
             if (! $patientUuid) {
                 throw new \InvalidArgumentException('Encounter requires patient_uuid.');
@@ -134,6 +154,10 @@ class SyncController extends Controller
             if (! $patient) {
                 throw new \RuntimeException('Patient not found for encounter sync: '.$patientUuid);
             }
+
+            // Enforce LGA assignment for data_clerk
+            $lgaUuidForCheck = $data['lga_uuid'] ?? $patient->lga_uuid;
+            $this->assertDataClerkLgaAllowed($syncUser, $lgaUuidForCheck);
 
             $incomingVersion = (int) ($data['version_stamp'] ?? 1);
             $existing = Encounter::where('uuid', $item['uuid'])->first();
@@ -160,7 +184,7 @@ class SyncController extends Controller
                 'supersedes_uuid' => $data['supersedes_uuid'] ?? null,
                 'findings' => $data['findings'] ?? null,
                 'notes' => $data['notes'] ?? null,
-                'created_by_user_id' => request()->user()?->id,
+                'created_by_user_id' => $syncUser?->id,
                 'sync_status' => 'synced',
                 'synced_at' => now(),
             ];
@@ -181,12 +205,18 @@ class SyncController extends Controller
             $data = $item['data'];
             $data['uuid'] = $item['uuid'];
 
+            $syncUser = request()->user();
+
             $patientUuid = $data['patient_uuid'] ?? null;
             $patient = $patientUuid ? Patient::where('uuid', $patientUuid)->first() : null;
 
             if (! $patient) {
                 throw new \RuntimeException('Referral requires a valid patient_uuid.');
             }
+
+            // Enforce LGA assignment for data_clerk
+            $lgaUuidForCheck = $data['lga_uuid'] ?? $patient->lga_uuid;
+            $this->assertDataClerkLgaAllowed($syncUser, $lgaUuidForCheck);
 
             $encounter = null;
             if (! empty($data['encounter_uuid'])) {
@@ -224,7 +254,7 @@ class SyncController extends Controller
                 'workflow_status' => $status === 'completed' ? 'completed' : 'pending',
                 'completed_at' => $data['completed_at'] ?? null,
                 'completed_by' => $data['completed_by'] ?? null,
-                'created_by_user_id' => request()->user()?->id,
+                'created_by_user_id' => $syncUser?->id,
                 'sync_status' => 'synced',
                 'synced_at' => now(),
             ];

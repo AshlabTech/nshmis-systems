@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\EncounterController;
 use App\Http\Controllers\Api\ExportController;
 use App\Http\Controllers\Api\MetadataController;
 use App\Http\Controllers\Api\PatientController;
+use App\Http\Controllers\Api\PdfController;
 use App\Http\Controllers\Api\ReferralController;
 use App\Http\Controllers\Api\SyncController;
 use App\Http\Controllers\Api\SyncLogController;
@@ -34,14 +35,17 @@ $registerRoutes = function (): void {
 
         Route::get('/patients', [PatientController::class, 'index']);
         Route::get('/patients/{patient:uuid}', [PatientController::class, 'show']);
+        Route::get('/patients/{patient:uuid}/pdf', [PdfController::class, 'patient']);
         Route::get('/exports/patients', [ExportController::class, 'patients']);
 
         Route::get('/encounters', [EncounterController::class, 'index']);
         Route::get('/encounters/{encounter:uuid}', [EncounterController::class, 'show']);
+        Route::get('/encounters/{encounter:uuid}/pdf', [PdfController::class, 'encounter']);
         Route::get('/exports/encounters', [ExportController::class, 'encounters']);
 
         Route::get('/referrals', [ReferralController::class, 'index']);
         Route::get('/referrals/{referral:uuid}', [ReferralController::class, 'show']);
+        Route::get('/referrals/{referral:uuid}/pdf', [PdfController::class, 'referral']);
         Route::patch('/referrals/{referral:uuid}/status', [ReferralController::class, 'updateStatus']);
         Route::get('/exports/referrals', [ExportController::class, 'referrals']);
 
@@ -54,6 +58,8 @@ $registerRoutes = function (): void {
         Route::post('/admin/settings/reset', [AppSettingController::class, 'reset']);
 
         Route::apiResource('/admin/users', UserController::class);
+        Route::get('/admin/users/{user}/lgas', [UserController::class, 'getLgas']);
+        Route::post('/admin/users/{user}/lgas', [UserController::class, 'syncLgas']);
         Route::apiResource('/admin/lgas', LgaController::class)->except(['show']);
         Route::apiResource('/admin/wards', WardController::class)->except(['show']);
         Route::apiResource('/admin/facilities', FacilityController::class)->except(['show']);

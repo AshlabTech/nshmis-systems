@@ -16,6 +16,8 @@ class Patient extends Model
         'uuid',
         'lga_id',
         'ward_id',
+        'primary_facility_id',
+        'primary_facility_uuid',
         'lga_uuid',
         'ward_uuid',
         'first_name',
@@ -28,6 +30,7 @@ class Patient extends Model
         'temporary_id_hash',
         'phone_number',
         'nhis_status',
+        'nin',
         'address_line',
         'created_by_user_id',
         'sync_status',
@@ -56,6 +59,11 @@ class Patient extends Model
     public function ward(): BelongsTo
     {
         return $this->belongsTo(Ward::class);
+    }
+
+    public function primaryFacility(): BelongsTo
+    {
+        return $this->belongsTo(Facility::class, 'primary_facility_id');
     }
 
     public function creator(): BelongsTo

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Laravel\Sanctum\HasApiTokens;
 
@@ -25,4 +26,11 @@ class User extends Authenticatable
         'password',
         'remember_token',
     ];
+
+    public function assignedLgas(): BelongsToMany
+    {
+        return $this->belongsToMany(Lga::class, 'user_lga_assignments', 'user_id', 'lga_id')
+            ->withPivot('assigned_by')
+            ->withTimestamps();
+    }
 }

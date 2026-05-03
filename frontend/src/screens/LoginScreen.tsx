@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Animated, Image, StyleSheet, Text, TextInput, View, ScrollView } from 'react-native';
+import { Animated, Image, Pressable, StyleSheet, Text, TextInput, View, ScrollView } from 'react-native';
+import { Eye, EyeOff } from 'lucide-react-native';
 import { useAppContext } from '../context/AppContext';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { FormCard } from '../components/FormCard';
@@ -12,6 +13,7 @@ export const LoginScreen = () => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const opacity = useFadeIn(380);
 
   const handleLogin = async () => {
@@ -63,16 +65,21 @@ export const LoginScreen = () => {
             keyboardType="email-address"
             returnKeyType="next"
           />
-          <TextInput
-            style={styles.input}
-            placeholder="Password"
-            placeholderTextColor={THEME.muted}
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            returnKeyType="done"
-            onSubmitEditing={() => void handleLogin()}
-          />
+          <View style={styles.passwordWrap}>
+            <TextInput
+              style={styles.passwordInput}
+              placeholder="Password"
+              placeholderTextColor={THEME.muted}
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!showPassword}
+              returnKeyType="done"
+              onSubmitEditing={() => void handleLogin()}
+            />
+            <Pressable onPress={() => setShowPassword((v) => !v)} hitSlop={8} style={styles.eyeBtn}>
+              {showPassword ? <EyeOff size={19} color={THEME.muted} /> : <Eye size={19} color={THEME.muted} />}
+            </Pressable>
+          </View>
 
           <PrimaryButton title="Login" onPress={() => void handleLogin()} loading={loading} />
 
@@ -121,6 +128,23 @@ const styles = StyleSheet.create({
     color: THEME.text,
     fontSize: 15,
   },
+  passwordWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: THEME.border,
+    borderRadius: 14,
+    minHeight: 52,
+    marginBottom: 12,
+  },
+  passwordInput: {
+    flex: 1,
+    paddingHorizontal: 14,
+    color: THEME.text,
+    fontSize: 15,
+  },
+  eyeBtn: { paddingHorizontal: 14 },
   error: { color: THEME.danger, fontSize: 13, marginBottom: 10 },
   note: { marginTop: 8, color: THEME.muted, fontSize: 12, lineHeight: 18 },
 });

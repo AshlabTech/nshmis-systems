@@ -21,7 +21,7 @@ function getConfig(routeKey) {
       singular: 'User',
       description: 'Create and manage role assignments for data clerks, supervisors, and state admins.',
       endpoint: '/admin/users',
-      columns: ['Name', 'Email', 'Role', 'Scope', 'Team', 'Action'],
+      columns: ['Name', 'Email', 'Role', 'Scope / LGAs', 'Team', 'Action'],
     },
     lgas: {
       title: 'LGAs Management',
@@ -147,8 +147,50 @@ function AdminFilters({ routeKey, query, metadata, onSubmit }) {
   );
 }
 
-function RowCells({ routeKey, item, metadata, onEdit, onDelete }) {
+function AssignLgasForm({ user, metadata, onSubmit }) {
+  const allLgas = metadata?.lgas || [];
+  const assignedIds = (user.assigned_lgas || []).map((l) => String(l.id));
+  const [selected, setSelected] = useState(assignedIds);
+
+  const toggle = (id) => {
+    setSelected((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  };
+
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); onSubmit(selected.map(Number)); }}>
+      <p style={{ marginBottom: 12, fontSize: 13, color: 'var(--text-secondary)' }}>
+        Select the LGAs this data clerk is authorised to operate in. They will only be able to enroll patients within these LGAs.
+      </p>
+      {allLgas.length === 0 && (
+        <p style={{ color: 'var(--text-muted)', fontSize: 12 }}>No LGAs defined yet. Add LGAs first.</p>
+      )}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+        {allLgas.map((lga) => {
+          const isChecked = selected.includes(String(lga.id));
+          return (
+            <label
+              key={lga.id}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px',
+                border: `1.5px solid ${isChecked ? 'var(--primary, #0d6b55)' : 'var(--border)'}`,
+                borderRadius: 6, cursor: 'pointer', fontSize: 13,
+                background: isChecked ? 'rgba(13,107,85,.07)' : 'var(--surface)',
+              }}
+            >
+              <input type="checkbox" checked={isChecked} onChange={() => toggle(String(lga.id))} style={{ accentColor: 'var(--primary, #0d6b55)' }} />
+              {lga.name}
+            </label>
+          );
+        })}
+      </div>
+      <button className="btn" type="submit">Save LGA Assignments</button>
+    </form>
+  );
+}
+
+function RowCells({ routeKey, item, metadata, onEdit, onDelete, onAssignLgas }) {
   if (routeKey === 'users') {
+    const assignedLgaNames = (item.assigned_lgas || []).map((l) => l.name).join(', ');
     return (
       <tr key={item.id}>
         <td>
@@ -159,14 +201,29 @@ function RowCells({ routeKey, item, metadata, onEdit, onDelete }) {
           <StatusPill value={item.role} />
         </td>
         <td>
-          {labelForLga(metadata, item.assigned_lga_uuid) || 'Statewide'}
-          <div className="mini-note">{labelForWard(metadata, item.assigned_ward_uuid) || 'All wards'}</div>
+          {item.role === 'data_clerk' ? (
+            assignedLgaNames ? (
+              <span style={{ fontSize: 12 }}>{assignedLgaNames}</span>
+            ) : (
+              <span style={{ fontSize: 12, color: 'var(--danger, #c00)' }}>No LGA assigned</span>
+            )
+          ) : (
+            <>
+              {labelForLga(metadata, item.assigned_lga_uuid) || 'Statewide'}
+              <div className="mini-note">{labelForWard(metadata, item.assigned_ward_uuid) || 'All wards'}</div>
+            </>
+          )}
         </td>
         <td>{item.team_name || '-'}</td>
         <td className="row-actions">
           <button className="link-btn" onClick={() => onEdit(item)}>
             Edit
           </button>
+          {item.role === 'data_clerk' && (
+            <button className="link-btn" onClick={() => onAssignLgas(item)}>
+              Assign LGAs
+            </button>
+          )}
           <button className="link-btn" onClick={() => onDelete(item)}>
             Delete
           </button>
@@ -446,6 +503,34 @@ export default function AdminResource({ routeKey }) {
     }
   }
 
+  async function handleAssignLgas(user, lgaIds) {
+    try {
+      const res = await apiRequest(`/admin/users/${user.id}/lgas`, {
+        method: 'POST',
+        body: { lga_ids: lgaIds },
+      });
+      showToast('LGA assignments saved.', 'success');
+      closeModal();
+      load(query);
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  function openAssignLgas(user) {
+    openModal({
+      title: `Assign LGAs — ${user.name}`,
+      subtitle: 'Select LGAs this data clerk can operate in.',
+      content: (
+        <AssignLgasForm
+          user={user}
+          metadata={metadata}
+          onSubmit={(lgaIds) => handleAssignLgas(user, lgaIds)}
+        />
+      ),
+    });
+  }
+
   if (!config) return <div className="empty-state">Unknown admin resource.</div>;
 
   return (
@@ -490,6 +575,7 @@ export default function AdminResource({ routeKey }) {
                 metadata={metadata}
                 onEdit={openEditor}
                 onDelete={handleDelete}
+                onAssignLgas={openAssignLgas}
               />
             )}
           />

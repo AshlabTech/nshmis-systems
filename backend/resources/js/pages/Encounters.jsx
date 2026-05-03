@@ -16,16 +16,27 @@ import Pagination from '../components/ui/Pagination';
 import StatusPill from '../components/ui/StatusPill';
 import { ControlledSelect, SelectField, TextField } from '../components/ui/FormField';
 
-function DetailGrid({ rows }) {
+function DetailSection({ title, children }) {
   return (
-    <div className="detail-grid">
-      {rows.map(([label, value]) => (
-        <div key={label} className="detail-cell">
-          <span className="detail-cell-label">{label}</span>
-          <span className="detail-cell-value">{String(value || '—')}</span>
-        </div>
-      ))}
+    <div className="detail-section">
+      <div className="detail-section-title">{title}</div>
+      {children}
     </div>
+  );
+}
+
+function DetailTable({ rows }) {
+  return (
+    <table className="detail-table">
+      <tbody>
+        {rows.map(([label, value]) => (
+          <tr key={label}>
+            <td className="detail-table-label">{label}</td>
+            <td className="detail-table-value">{value ?? '—'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -52,61 +63,107 @@ function formatFindingValue(value) {
   return value || '—';
 }
 
-function FindingsPanel({ findings = {} }) {
-  const orderedKeys = Object.keys(findingLabels).filter((key) => findings[key] !== undefined && findings[key] !== null && findings[key] !== '');
-  const extraKeys = Object.keys(findings).filter((key) => !findingLabels[key] && findings[key] !== undefined && findings[key] !== null && findings[key] !== '');
-  const rows = [...orderedKeys, ...extraKeys].map((key) => [findingLabels[key] || formatLabel(key), formatFindingValue(findings[key])]);
-
-  if (!rows.length) {
-    return <div className="empty-state">No findings recorded for this encounter.</div>;
-  }
-
-  return <DetailGrid rows={rows} />;
+function fetchEncounterPdf(uuid, token, showToast) {
+  return fetch(`/api/v1/encounters/${uuid}/pdf`, { headers: { Authorization: `Bearer ${token}` } })
+    .then((r) => { if (!r.ok) throw new Error('PDF generation failed.'); return r.blob(); })
+    .catch((err) => { showToast(err.message, 'error'); return null; });
 }
 
-function EncounterDetail({ encounter }) {
+function EncounterDetail({ encounter, token, showToast }) {
+  const handleDownloadPdf = async () => {
+    const blob = await fetchEncounterPdf(encounter.uuid, token, showToast);
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `encounter-${encounter.uuid}.pdf`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handlePrint = async () => {
+    const blob = await fetchEncounterPdf(encounter.uuid, token, showToast);
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const win = window.open(url);
+    win?.addEventListener('load', () => { win.print(); });
+  };
+
+  const findings = encounter.findings || {};
+  const orderedKeys = Object.keys(findingLabels).filter((k) => findings[k] !== undefined && findings[k] !== null && findings[k] !== '');
+  const extraKeys = Object.keys(findings).filter((k) => !findingLabels[k] && findings[k] !== undefined && findings[k] !== null && findings[k] !== '');
+  const findingRows = [...orderedKeys, ...extraKeys].map((k) => [findingLabels[k] || formatLabel(k), formatFindingValue(findings[k])]);
+
   return (
-    <>
-      <DetailGrid
-        rows={[
-          ['Patient', fullName(encounter.patient)],
+    <div className="detail-modal-body">
+      <div className="detail-modal-actions" style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <button className="btn-outline btn-sm" onClick={handlePrint}>🖨 Print</button>
+        <button className="btn-outline btn-sm" onClick={handleDownloadPdf}>⬇ Download PDF</button>
+      </div>
+
+      <DetailSection title="Encounter Metadata">
+        <DetailTable rows={[
+          ['Reference', shortRef(encounter.uuid)],
           ['Encounter Type', encounter.encounter_type],
           ['Service Point', encounter.service_point],
           ['Date', formatDate(encounter.encounter_date)],
+          ['Version', encounter.version_stamp ?? 1],
+        ]} />
+      </DetailSection>
+
+      <DetailSection title="Patient Summary">
+        <DetailTable rows={[
+          ['Patient Name', fullName(encounter.patient)],
+          ['Patient Ref', shortRef(encounter.patient?.uuid)],
+          ['Sex', encounter.patient?.sex],
+          ['Age', encounter.patient?.estimated_age_years ? `${encounter.patient.estimated_age_years} years` : null],
+          ['NHIS Status', encounter.patient?.nhis_status],
+        ]} />
+      </DetailSection>
+
+      <DetailSection title="Location">
+        <DetailTable rows={[
           ['LGA', encounter.lga?.name],
           ['Ward', encounter.ward?.name],
-          ['Data Clerk', encounter.creator?.name],
-          ['Sync Status', encounter.sync_status],
-        ]}
-      />
-      <div className="panel" style={{ marginTop: 16 }}>
-        <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 700 }}>Findings</h3>
-        <FindingsPanel findings={encounter.findings || {}} />
-        {encounter.notes && (
-          <>
-            <h3 style={{ margin: '0 0 6px', fontSize: 14, fontWeight: 700 }}>Notes</h3>
-            <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{encounter.notes}</p>
-          </>
-        )}
-        {(encounter.referrals?.length > 0) && (
-          <>
-            <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 700 }}>Referrals</h3>
-            <DataTable
-              headers={['Referral', 'Facility', 'Urgency', 'Status']}
-              rows={encounter.referrals || []}
-              renderRow={(item) => (
-                <tr key={item.uuid}>
-                  <td>{shortRef(item.uuid)}</td>
-                  <td>{item.referred_to_facility || '—'}</td>
-                  <td>{item.urgency || '—'}</td>
-                  <td><StatusPill value={item.workflow_status} /></td>
-                </tr>
-              )}
-            />
-          </>
-        )}
-      </div>
-    </>
+        ]} />
+      </DetailSection>
+
+      {findingRows.length > 0 && (
+        <DetailSection title="Clinical Information & Services">
+          <DetailTable rows={findingRows} />
+        </DetailSection>
+      )}
+
+      {encounter.notes && (
+        <DetailSection title="Notes">
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, padding: '8px 0' }}>{encounter.notes}</p>
+        </DetailSection>
+      )}
+
+      <DetailSection title="Capture & Sync">
+        <DetailTable rows={[
+          ['Captured By', encounter.creator?.name],
+          ['Sync Status', <StatusPill key="sync" value={encounter.sync_status} />],
+          ['Synced At', encounter.synced_at ? formatDate(encounter.synced_at, true) : null],
+        ]} />
+      </DetailSection>
+
+      {(encounter.referrals?.length > 0) && (
+        <DetailSection title="Referral Information">
+          <DataTable
+            headers={['Ref', 'Facility', 'Urgency', 'Status', 'Reason']}
+            rows={encounter.referrals || []}
+            renderRow={(item) => (
+              <tr key={item.uuid}>
+                <td>{shortRef(item.uuid)}</td>
+                <td>{item.referred_to_facility || '—'}</td>
+                <td>{item.urgency || '—'}</td>
+                <td><StatusPill value={item.workflow_status} /></td>
+                <td style={{ maxWidth: 180, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.referral_reason || '—'}</td>
+              </tr>
+            )}
+          />
+        </DetailSection>
+      )}
+    </div>
   );
 }
 
@@ -145,10 +202,11 @@ export default function Encounters() {
   async function openDetail(uuid) {
     try {
       const enc = await apiRequest(`/encounters/${uuid}`);
+      const token = auth.token;
       openModal({
-        title: `Encounter`,
+        title: 'Encounter',
         subtitle: shortRef(enc.uuid),
-        content: <EncounterDetail encounter={enc} />,
+        content: <EncounterDetail encounter={enc} token={token} showToast={showToast} />,
       });
     } catch (err) {
       showToast(err.message, 'error');
@@ -225,5 +283,3 @@ export default function Encounters() {
     </>
   );
 }
-
-

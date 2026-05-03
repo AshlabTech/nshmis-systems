@@ -58,14 +58,17 @@ export const AppProvider: React.FC<React.PropsWithChildren> = ({ children }) => 
       setBranding(cachedBranding);
       setDeviceId(localDeviceId);
       setUserIdState(localUserId);
+
+      // Await metadata so LGA/ward/facility lists are in SQLite before any screen renders.
+      // If offline the catch is silent and the wizard uses whatever is already cached in the DB.
+      if (auth === 'true' && token) {
+        await metadataService.refreshAdministrativeMetadata(token).catch(() => undefined);
+      }
+
       setIsAuthenticated(auth === 'true' && token !== null);
       setReady(true);
 
-      // Refresh branding and metadata in background after UI is ready
       brandingService.fetch().then(setBranding).catch(() => undefined);
-      if (token) {
-        metadataService.refreshAdministrativeMetadata(token).catch(() => undefined);
-      }
     };
 
     bootstrap();
@@ -89,16 +92,19 @@ export const AppProvider: React.FC<React.PropsWithChildren> = ({ children }) => 
     await AsyncStorage.setItem(AUTH_KEY, 'true');
     await setUserId(resolvedUserId);
     setUserIdState(resolvedUserId);
-    setIsAuthenticated(true);
-    // Refresh metadata and branding after successful login
-    metadataService.refreshAdministrativeMetadata(token).catch(() => undefined);
+    // Await metadata so LGA/facility lists are in SQLite before the app renders.
+    // Branding is non-critical — keep fire-and-forget.
+    await metadataService.refreshAdministrativeMetadata(token).catch(() => undefined);
     brandingService.fetch().then(setBranding).catch(() => undefined);
+    setIsAuthenticated(true);
   };
 
   const signOut = async () => {
     await AsyncStorage.removeItem(AUTH_KEY);
+    await AsyncStorage.removeItem('niger_hmis_user_id');
     await tokenStore.clear();
     setIsAuthenticated(false);
+    setUserIdState('');
   };
 
   const runSync = async (options?: { forceFull?: boolean; retryFailedOnly?: boolean }) => {

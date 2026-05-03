@@ -12,6 +12,6 @@ export const THEME = {
   background: '#F4FAFA',
 };
 
-export const API_BASE_URL = 'http://192.168.1.105:8000/api/v1';
+export const API_BASE_URL = 'https://hmis.ashlabtech.ng/api/v1';
 export const APP_NAME = 'Niger HMIS Outreach';
-export const DEBUG_API_TRAFFIC = true;
+export const DEBUG_API_TRAFFIC = false;

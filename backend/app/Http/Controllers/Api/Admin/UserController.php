@@ -8,6 +8,7 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\DB;
 
 class UserController extends Controller
 {
@@ -28,7 +29,15 @@ class UserController extends Controller
             ->when($request->filled('role'), fn ($builder) => $builder->where('role', $request->string('role')))
             ->latest();
 
-        return response()->json($query->paginate((int) $request->input('per_page', 20)));
+        $paginated = $query->paginate((int) $request->input('per_page', 20));
+
+        // Attach assigned LGAs to each user in the listing
+        $paginated->getCollection()->transform(function (User $user) {
+            $user->assigned_lgas = $user->assignedLgas()->get(['lgas.id', 'lgas.uuid', 'lgas.name']);
+            return $user;
+        });
+
+        return response()->json($paginated);
     }
 
     public function store(Request $request): JsonResponse
@@ -46,12 +55,14 @@ class UserController extends Controller
 
         $validated['password'] = Hash::make($validated['password']);
         $user = User::create($validated);
+        $user->assigned_lgas = [];
         return response()->json($user, 201);
     }
 
     public function show(Request $request, User $user): JsonResponse
     {
         $this->ensureStateAdmin($request->user());
+        $user->assigned_lgas = $user->assignedLgas()->get(['lgas.id', 'lgas.uuid', 'lgas.name']);
         return response()->json($user);
     }
 
@@ -73,6 +84,7 @@ class UserController extends Controller
         }
 
         $user->update($validated);
+        $user->assigned_lgas = $user->assignedLgas()->get(['lgas.id', 'lgas.uuid', 'lgas.name']);
         return response()->json($user);
     }
 
@@ -81,5 +93,40 @@ class UserController extends Controller
         $this->ensureStateAdmin($request->user());
         $user->delete();
         return response()->json(['message' => 'User deleted.']);
+    }
+
+    /**
+     * Sync LGA assignments for a user (replaces all existing assignments).
+     * Body: { lga_ids: [1, 2, 3] }
+     */
+    public function syncLgas(Request $request, User $user): JsonResponse
+    {
+        $this->ensureStateAdmin($request->user());
+
+        $validated = $request->validate([
+            'lga_ids' => ['required', 'array'],
+            'lga_ids.*' => ['integer', 'exists:lgas,id'],
+        ]);
+
+        $adminId = $request->user()->id;
+        $syncData = collect($validated['lga_ids'])->mapWithKeys(fn ($lgaId) => [
+            $lgaId => ['assigned_by' => $adminId],
+        ])->all();
+
+        $user->assignedLgas()->sync($syncData);
+
+        return response()->json([
+            'message' => 'LGA assignments updated.',
+            'assigned_lgas' => $user->assignedLgas()->get(['lgas.id', 'lgas.uuid', 'lgas.name']),
+        ]);
+    }
+
+    /**
+     * List the LGAs assigned to a specific user.
+     */
+    public function getLgas(Request $request, User $user): JsonResponse
+    {
+        $this->ensureStateAdmin($request->user());
+        return response()->json($user->assignedLgas()->get(['lgas.id', 'lgas.uuid', 'lgas.name']));
     }
 }

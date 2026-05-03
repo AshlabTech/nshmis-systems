@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(xargs grep *)"
+      "Bash(xargs grep *)",
+      "Bash(composer require *)",
+      "Bash(php composer.phar require barryvdh/laravel-dompdf --no-interaction)",
+      "PowerShell(Get-Command php -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-Command composer -ErrorAction SilentlyContinue)"
     ]
   }
 }

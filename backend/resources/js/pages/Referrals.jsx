@@ -6,21 +6,55 @@ import Pagination from '../components/ui/Pagination';
 import StatusPill from '../components/ui/StatusPill';
 import { ControlledSelect, SelectField, TextField } from '../components/ui/FormField';
 
-function DetailGrid({ rows }) {
+function DetailSection({ title, children }) {
   return (
-    <div className="detail-grid">
-      {rows.map(([label, value]) => (
-        <div key={label} className="detail-cell">
-          <span className="detail-cell-label">{label}</span>
-          <span className="detail-cell-value">{String(value || '—')}</span>
-        </div>
-      ))}
+    <div className="detail-section">
+      <div className="detail-section-title">{title}</div>
+      {children}
     </div>
   );
 }
 
-function ReferralDetail({ referral, metadata, onStatusSaved }) {
-  const { apiRequest, showToast } = useApp();
+function DetailTable({ rows }) {
+  return (
+    <table className="detail-table">
+      <tbody>
+        {rows.map(([label, value]) => (
+          <tr key={label}>
+            <td className="detail-table-label">{label}</td>
+            <td className="detail-table-value">{value ?? '—'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function fetchReferralPdf(uuid, token, showToast) {
+  return fetch(`/api/v1/referrals/${uuid}/pdf`, { headers: { Authorization: `Bearer ${token}` } })
+    .then((r) => { if (!r.ok) throw new Error('PDF generation failed.'); return r.blob(); })
+    .catch((err) => { showToast(err.message, 'error'); return null; });
+}
+
+function ReferralDetail({ referral, metadata, token, showToast, onStatusSaved }) {
+  const { apiRequest } = useApp();
+
+  const handleDownloadPdf = async () => {
+    const blob = await fetchReferralPdf(referral.uuid, token, showToast);
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `referral-${referral.uuid}.pdf`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handlePrint = async () => {
+    const blob = await fetchReferralPdf(referral.uuid, token, showToast);
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const win = window.open(url);
+    win?.addEventListener('load', () => { win.print(); });
+  };
 
   async function handleStatusSubmit(e) {
     e.preventDefault();
@@ -38,36 +72,68 @@ function ReferralDetail({ referral, metadata, onStatusSaved }) {
   }
 
   return (
-    <>
-      <DetailGrid
-        rows={[
-          ['Patient', fullName(referral.patient)],
-          ['Linked Encounter', shortRef(referral.encounter?.uuid)],
-          ['Referred To', referral.referred_to_facility || '—'],
-          ['Urgency', referral.urgency || '—'],
-          ['Workflow Status', referral.workflow_status || '—'],
-          ['Operational Status', referral.status || '—'],
+    <div className="detail-modal-body">
+      <div className="detail-modal-actions" style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <button className="btn-outline btn-sm" onClick={handlePrint}>🖨 Print</button>
+        <button className="btn-outline btn-sm" onClick={handleDownloadPdf}>⬇ Download PDF</button>
+      </div>
+
+      <DetailSection title="Patient Summary">
+        <DetailTable rows={[
+          ['Patient Name', fullName(referral.patient)],
+          ['Patient Ref', shortRef(referral.patient?.uuid)],
+          ['Sex', referral.patient?.sex],
+          ['Age', referral.patient?.estimated_age_years ? `${referral.patient.estimated_age_years} years` : null],
+          ['NHIS Status', referral.patient?.nhis_status],
           ['LGA', referral.lga?.name],
           ['Ward', referral.ward?.name],
-        ]}
-      />
+        ]} />
+      </DetailSection>
+
+      <DetailSection title="Encounter Summary">
+        <DetailTable rows={[
+          ['Encounter Ref', referral.encounter?.uuid ? shortRef(referral.encounter.uuid) : null],
+          ['Encounter Date', referral.encounter?.encounter_date ? formatDate(referral.encounter.encounter_date) : null],
+        ]} />
+      </DetailSection>
+
+      <DetailSection title="Referral Details">
+        <DetailTable rows={[
+          ['Referral Ref', shortRef(referral.uuid)],
+          ['Referred To Facility', referral.referred_to_facility],
+          ['Urgency', referral.urgency ? referral.urgency.charAt(0).toUpperCase() + referral.urgency.slice(1) : null],
+          ['Referral Status', <StatusPill key="status" value={referral.status} />],
+          ['Workflow Status', <StatusPill key="wf" value={referral.workflow_status} />],
+          ['Follow-up Date', referral.follow_up_date ? formatDate(referral.follow_up_date) : null],
+          ['Completed Date', referral.completed_at ? formatDate(referral.completed_at, true) : null],
+          ['Completed By', referral.completed_by],
+        ]} />
+      </DetailSection>
+
       {referral.referral_reason && (
-        <div style={{ marginTop: 14, padding: '12px 14px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--r-md)' }}>
-          <span style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 6 }}>Referral Reason</span>
-          <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>{referral.referral_reason}</p>
-        </div>
+        <DetailSection title="Referral Reason">
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, padding: '8px 0' }}>{referral.referral_reason}</p>
+        </DetailSection>
       )}
-      <div style={{ marginTop: 14, padding: 16, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--r-md)' }}>
-        <p style={{ margin: '0 0 12px', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>Update Status</p>
+
+      <DetailSection title="Capture & Sync">
+        <DetailTable rows={[
+          ['Created By', referral.creator?.name],
+          ['Created At', formatDate(referral.created_at, true)],
+          ['Sync Status', <StatusPill key="sync" value={referral.sync_status} />],
+        ]} />
+      </DetailSection>
+
+      <DetailSection title="Update Status">
         <form className="filters compact" style={{ padding: 0, background: 'none', border: 'none', marginBottom: 0 }} onSubmit={handleStatusSubmit}>
           <SelectField name="status" label="New Status" options={metadata?.referral_statuses || []} defaultValue={referral.workflow_status} />
           <div className="field">
             <label>&nbsp;</label>
-            <button className="btn" type="submit">Save</button>
+            <button className="btn" type="submit">Save Status</button>
           </div>
         </form>
-      </div>
-    </>
+      </DetailSection>
+    </div>
   );
 }
 
@@ -98,7 +164,7 @@ function StatusUpdateForm({ uuid, currentStatus, metadata, onSaved }) {
 }
 
 export default function Referrals() {
-  const { metadata, apiRequest, downloadExport, openModal, closeModal, showToast } = useApp();
+  const { auth, metadata, apiRequest, downloadExport, openModal, closeModal, showToast } = useApp();
   const [result, setResult] = useState(null);
   const [query, setQuery] = useState({ page: 1, per_page: 20 });
   const [lgaFilter, setLgaFilter] = useState('');
@@ -132,10 +198,19 @@ export default function Referrals() {
   async function openDetail(uuid) {
     try {
       const referral = await apiRequest(`/referrals/${uuid}`);
+      const token = auth.token;
       openModal({
         title: 'Referral Details',
         subtitle: shortRef(referral.uuid),
-        content: <ReferralDetail referral={referral} metadata={metadata} onStatusSaved={() => { closeModal(); load(query); }} />,
+        content: (
+          <ReferralDetail
+            referral={referral}
+            metadata={metadata}
+            token={token}
+            showToast={showToast}
+            onStatusSaved={() => { closeModal(); load(query); }}
+          />
+        ),
       });
     } catch (err) {
       showToast(err.message, 'error');
@@ -216,5 +291,3 @@ export default function Referrals() {
     </>
   );
 }
-
-

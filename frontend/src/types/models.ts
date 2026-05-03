@@ -18,8 +18,10 @@ export type PatientRecord = {
   sex?: string | null;
   phone?: string | null;
   nhis_status?: string | null;
+  nin?: string | null;
   lga_uuid?: string | null;
   ward_uuid?: string | null;
+  primary_facility_uuid?: string | null;
   consent_confirmed: boolean;
   temporary_id_hash?: string | null;
   sync_status: SyncStatus;
@@ -123,7 +125,10 @@ export type FacilityRecord = {
   uuid: string;
   name: string;
   facility_type?: string | null;
+  type?: string | null;
   lga_uuid?: string | null;
+  ward_uuid?: string | null;
+  status?: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -140,8 +145,10 @@ export type WizardData = {
     sex: string;
     phone: string;
     nhis_status: string;
+    nin: string;
     lga_uuid: string;
     ward_uuid: string;
+    primary_facility_uuid: string;
     consent_confirmed: boolean;
   };
   clinical: {
